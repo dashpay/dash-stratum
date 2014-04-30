@@ -1,0 +1,177 @@
+diff --git a/lib/block_template.py b/lib/block_template.py
+index bb67bca..9fe2687 100644
+--- a/lib/block_template.py
++++ b/lib/block_template.py
+@@ -53,17 +53,15 @@ class BlockTemplate(halfnode.CBlock):
+     def fill_from_rpc(self, data):
+         '''Convert getblocktemplate result into BlockTemplate instance'''
+         
++        payee = None
++        if(data['payee'] != ''): payee = util.script_to_address(data['payee'])
++
+         #txhashes = [None] + [ binascii.unhexlify(t['hash']) for t in data['transactions'] ]
+         txhashes = [None] + [ util.ser_uint256(int(t['hash'], 16)) for t in data['transactions'] ]
+         mt = merkletree.MerkleTree(txhashes)
+-        if settings.COINDAEMON_Reward == 'POW':
+-            coinbase = CoinbaseTransactionPOW(self.timestamper, self.coinbaser, data['coinbasevalue'],
+-                                              data['coinbaseaux']['flags'], data['height'],
+-                                              settings.COINBASE_EXTRAS)
+-        else:
+-            coinbase = CoinbaseTransactionPOS(self.timestamper, self.coinbaser, data['coinbasevalue'],
+-                                              data['coinbaseaux']['flags'], data['height'],
+-                                              settings.COINBASE_EXTRAS, data['curtime'])
++        coinbase = CoinbaseTransactionPOW(self.timestamper, self.coinbaser, payee, data['coinbasevalue'],
++                                          data['coinbaseaux']['flags'], data['height'],
++                                          settings.COINBASE_EXTRAS)
+ 
+         self.height = data['height']
+         self.nVersion = data['version']
+@@ -72,8 +70,14 @@ class BlockTemplate(halfnode.CBlock):
+         self.hashMerkleRoot = 0
+         self.nTime = 0
+         self.nNonce = 0
++        self.masternode_payments = data['masternode_payments']
+         self.vtx = [ coinbase, ]
+-        
++
++        for vote in data['votes']:
++            v = halfnode.CMasterNodeVote()
++            v.deserialize(StringIO.StringIO(binascii.unhexlify(vote)))
++            self.vmn.append(v)
++
+         for tx in data['transactions']:
+             t = halfnode.CTransaction()
+             t.deserialize(StringIO.StringIO(binascii.unhexlify(tx['data'])))
+diff --git a/lib/coinbasetx.py b/lib/coinbasetx.py
+index 08755a5..36b4b81 100644
+--- a/lib/coinbasetx.py
++++ b/lib/coinbasetx.py
+@@ -16,7 +16,7 @@ class CoinbaseTransactionPOW(halfnode.CTransaction):
+     extranonce_placeholder = struct.pack(extranonce_type, int('f000000ff111111f', 16))
+     extranonce_size = struct.calcsize(extranonce_type)
+ 
+-    def __init__(self, timestamper, coinbaser, value, flags, height, data):
++    def __init__(self, timestamper, coinbaser, payee, value, flags, height, data):
+         super(CoinbaseTransactionPOW, self).__init__()
+         log.debug("Got to CoinBaseTX")
+         #self.extranonce = 0
+@@ -34,6 +34,15 @@ class CoinbaseTransactionPOW(halfnode.CTransaction):
+         )
+                 
+         tx_in.scriptSig = tx_in._scriptSig_template[0] + self.extranonce_placeholder + tx_in._scriptSig_template[1]
++
++        tx_out2 = None 
++        if(payee != None):
++            value2 = value / 10
++            value  -= value2
++
++            tx_out2 = halfnode.CTxOut()
++            tx_out2.nValue = value2
++            tx_out2.scriptPubKey = payee
+     
+         tx_out = halfnode.CTxOut()
+         tx_out.nValue = value
+@@ -43,6 +52,7 @@ class CoinbaseTransactionPOW(halfnode.CTransaction):
+             self.strTxComment = "http://github.com/ahmedbodi/stratum-mining"
+         self.vin.append(tx_in)
+         self.vout.append(tx_out)
++        if tx_out2: self.vout.append(tx_out2)
+         
+         # Two parts of serialized coinbase, just put part1 + extranonce + part2 to have final serialized tx
+         self._serialized = super(CoinbaseTransactionPOW, self).serialize().split(self.extranonce_placeholder)
+diff --git a/lib/halfnode.py b/lib/halfnode.py
+index 8271c3d..2ab1e3d 100644
+--- a/lib/halfnode.py
++++ b/lib/halfnode.py
+@@ -207,6 +209,30 @@ class CTransaction(object):
+     def __repr__(self):
+         return "CTransaction(nVersion=%i vin=%s vout=%s nLockTime=%i)" % (self.nVersion, repr(self.vin), repr(self.vout), self.nLockTime)
+ 
++class CMasterNodeVote(object):        
++    def __init__(self):
++        """int votes;
++        CScript pubkey;
++        int64 blockHeight"""
++
++        self.blockHeight = 0
++        self.scriptPubKey = ""
++        self.votes = 0
++    def deserialize(self, f):
++        self.blockHeight = struct.unpack("<q", f.read(8))[0]
++        self.scriptPubKey = deser_string(f)
++        self.votes = struct.unpack("<i", f.read(4))[0]
++    def serialize(self):
++        r = ""
++        r += struct.pack("<q", self.blockHeight)
++        r += ser_string(self.scriptPubKey)
++        r += struct.pack("<i", self.votes)
++        print "mnv", self.scriptPubKey, ser_string(self.scriptPubKey)
++        return r
++    def __repr__(self):
++        return "CMasterNodeVote(blockHeight=%d scriptPubKey=%s, votes=%d)" % (self.blockHeight, binascii.hexlify(self.scriptPubKey), self.votes)
++
++
+ class CBlock(object):
+     def __init__(self):
+         self.nVersion = 1
+@@ -216,8 +242,10 @@ class CBlock(object):
+         self.nBits = 0
+         self.nNonce = 0
+         self.vtx = []
++        self.vmn = []
+         self.sha256 = None
+-	self.algo = None
++        self.algo = None
++        self.masternode_payments = False
+         if settings.COINDAEMON_Reward == 'POS':
+             self.signature = b""
+         else: pass
+@@ -230,6 +258,7 @@ class CBlock(object):
+         self.nBits = struct.unpack("<I", f.read(4))[0]
+         self.nNonce = struct.unpack("<I", f.read(4))[0]
+         self.vtx = deser_vector(f, CTransaction)
++        if self.masternode_payments: self.vmn = deser_vector(f, CMasterNodeVote)
+         if settings.COINDAEMON_Reward == 'POS':
+             self.signature = deser_string(f)
+ 
+@@ -243,20 +272,21 @@ class CBlock(object):
+         r.append(struct.pack("<I", self.nBits))
+         r.append(struct.pack("<I", self.nNonce))
+         r.append(ser_vector(self.vtx))
++        if self.masternode_payments: r.append(ser_vector(self.vmn))
+         if settings.COINDAEMON_Reward == 'POS':
+             r.append(ser_string(self.signature))
+         return ''.join(r)
+ 
+     def calc_algo(self):
+         if self.algo is None:
+-               r = []
+-               r.append(struct.pack("<i", self.nVersion))
+-               r.append(ser_uint256(self.hashPrevBlock))
+-               r.append(ser_uint256(self.hashMerkleRoot))
+-               r.append(struct.pack("<I", self.nTime))
+-               r.append(struct.pack("<I", self.nBits))
+-               r.append(struct.pack("<I", self.nNonce))
+-               self.algo = uint256_from_str(algo.getPoWHash(''.join(r)))
++           r = []
++           r.append(struct.pack("<i", self.nVersion))
++           r.append(ser_uint256(self.hashPrevBlock))
++           r.append(ser_uint256(self.hashMerkleRoot))
++           r.append(struct.pack("<I", self.nTime))
++           r.append(struct.pack("<I", self.nBits))
++           r.append(struct.pack("<I", self.nNonce))
++           self.algo = uint256_from_str(algo.getPoWHash(''.join(r)))
+         return self.algo
+ 
+ 
+@@ -287,7 +317,7 @@ class CBlock(object):
+             return False
+         return True
+     def __repr__(self):
+-        return "CBlock(nVersion=%i hashPrevBlock=%064x hashMerkleRoot=%064x nTime=%s nBits=%08x nNonce=%08x vtx=%s)" % (self.nVersion, self.hashPrevBlock, self.hashMerkleRoot, time.ctime(self.nTime), self.nBits, self.nNonce, repr(self.vtx))
++        return "CBlock(nVersion=%i hashPrevBlock=%064x hashMerkleRoot=%064x nTime=%s nBits=%08x nNonce=%08x vtx=%s, vmn=%s)" % (self.nVersion, self.hashPrevBlock, self.hashMerkleRoot, time.ctime(self.nTime), self.nBits, self.nNonce, repr(self.vtx), repr(self.vmn))
+ 
+ class msg_version(object):
+     command = "version"
+diff --git a/lib/template_registry.py b/lib/template_registry.py
+index 84027aa..f485b38 100644
