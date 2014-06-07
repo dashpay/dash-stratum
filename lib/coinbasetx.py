@@ -37,7 +37,7 @@ class CoinbaseTransactionPOW(halfnode.CTransaction):
 
         tx_out2 = None 
         if(payee != None):
-            value2 = value / 10
+            value2 = value / 5
             value  -= value2
 
             tx_out2 = halfnode.CTxOut()
