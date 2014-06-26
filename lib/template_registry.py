@@ -249,7 +249,7 @@ class TemplateRegistry(object):
         # Algebra tells us the diff_to_target is the same as hash_to_diff
         share_diff = int(self.diff_to_target(hash_int))
         
-        #log.info( "------- %s %s" % (job.target, target_user) )
+        log.info( "------- %s %s" % (job.target, target_user) )
 
         # 5. Compare hash with target of the network
         if hash_int <= job.target:

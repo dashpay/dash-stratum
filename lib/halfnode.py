@@ -258,7 +258,7 @@ class CBlock(object):
         self.nBits = struct.unpack("<I", f.read(4))[0]
         self.nNonce = struct.unpack("<I", f.read(4))[0]
         self.vtx = deser_vector(f, CTransaction)
-        if self.masternode_payments: self.vmn = deser_vector(f, CMasterNodeVote)
+        #if self.masternode_payments: self.vmn = deser_vector(f, CMasterNodeVote)
         if settings.COINDAEMON_Reward == 'POS':
             self.signature = deser_string(f)
 
@@ -272,7 +272,7 @@ class CBlock(object):
         r.append(struct.pack("<I", self.nBits))
         r.append(struct.pack("<I", self.nNonce))
         r.append(ser_vector(self.vtx))
-        if self.masternode_payments: r.append(ser_vector(self.vmn))
+        #if self.masternode_payments: r.append(ser_vector(self.vmn))
         if settings.COINDAEMON_Reward == 'POS':
             r.append(ser_string(self.signature))
         return ''.join(r)
