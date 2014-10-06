@@ -56,10 +56,12 @@ class BlockTemplate(halfnode.CBlock):
         payee = None
         if(data['payee'] != ''): payee = util.script_to_address(data['payee'])
 
+        payee_amount = data.get('payee_amount', data['coinbasevalue']/5) #default to 20%
+
         #txhashes = [None] + [ binascii.unhexlify(t['hash']) for t in data['transactions'] ]
         txhashes = [None] + [ util.ser_uint256(int(t['hash'], 16)) for t in data['transactions'] ]
         mt = merkletree.MerkleTree(txhashes)
-        coinbase = CoinbaseTransactionPOW(self.timestamper, self.coinbaser, payee, data['coinbasevalue'],
+        coinbase = CoinbaseTransactionPOW(self.timestamper, self.coinbaser, payee, payee_amount, data['coinbasevalue'],
                                           data['coinbaseaux']['flags'], data['height'],
                                           settings.COINBASE_EXTRAS)
 
