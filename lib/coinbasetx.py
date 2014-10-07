@@ -16,7 +16,7 @@ class CoinbaseTransactionPOW(halfnode.CTransaction):
     extranonce_placeholder = struct.pack(extranonce_type, int('f000000ff111111f', 16))
     extranonce_size = struct.calcsize(extranonce_type)
 
-    def __init__(self, timestamper, coinbaser, payee, value, flags, height, data):
+    def __init__(self, timestamper, coinbaser, payee, payee_amount, value, flags, height, data):
         super(CoinbaseTransactionPOW, self).__init__()
         log.debug("Got to CoinBaseTX")
         #self.extranonce = 0
@@ -37,11 +37,10 @@ class CoinbaseTransactionPOW(halfnode.CTransaction):
 
         tx_out2 = None 
         if(payee != None):
-            value2 = value / 5
-            value  -= value2
+            value  -= payee_amount
 
             tx_out2 = halfnode.CTxOut()
-            tx_out2.nValue = value2
+            tx_out2.nValue = payee_amount
             tx_out2.scriptPubKey = payee
     
         tx_out = halfnode.CTxOut()
